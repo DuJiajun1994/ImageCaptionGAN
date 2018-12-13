@@ -31,7 +31,7 @@ class Evaluator:
             for name, item in data.items():
                 data[name] = item.to(self.device)
             with torch.no_grad():
-                seqs = generator.greedy_decode(data['fc_feats'], data['att_feats'], data['att_masks']).cpu().numpy()
+                seqs = generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks']).cpu().numpy()
             captions = self._decode_captions(seqs)
             for i, caption in enumerate(captions):
                 image_id = images[i]
@@ -48,13 +48,8 @@ class Evaluator:
         cache_path = os.path.join('eval_results/predictions.json')
 
         coco = COCO(self.annotation_file)
-        valids = coco.getImgIds()
-
-        # filter results to only those in MSCOCO validation set (will be about a third)
-        predictions_filtered = [prediction for prediction in predictions if prediction['image_id'] in valids]
-        print('using %d/%d predictions' % (len(predictions_filtered), len(predictions)))
         with open(cache_path, 'w') as fid:
-            json.dump(predictions_filtered, fid)
+            json.dump(predictions, fid)
 
         cocoRes = coco.loadRes(cache_path)
         cocoEval = COCOEvalCap(coco, cocoRes)
