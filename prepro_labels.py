@@ -53,7 +53,6 @@ def build_vocab(imgs, count_thr):
         for sent in img['sentences']:
             txt = sent['tokens']
             caption = [w if counts.get(w, 0) > count_thr else 'UNK' for w in txt]
-            caption.append('EOS')
             img['final_captions'].append(caption)
 
     return vocab
@@ -68,7 +67,7 @@ def save_train_captions(imgs, wtoi, max_length):
         if img['split'] == 'train' or img['split'] == 'restval':
             cnt += 1
             for caption in img['final_captions']:
-                label = np.zeros(max_length, dtype='uint32')
+                label = np.zeros(max_length, dtype=np.int)
                 for i, w in enumerate(caption):
                     if i < max_length:
                         label[i] = wtoi[w]
@@ -113,3 +112,5 @@ if __name__ == "__main__":
     save_train_captions(imgs, wtoi, args.max_length)
     save_images(imgs, 'val')
     save_images(imgs, 'test')
+    with open('data/vocab.json', 'w') as fid:
+        json.dump(itow, fid)
