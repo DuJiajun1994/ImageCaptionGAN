@@ -32,10 +32,10 @@ class Generator(nn.Module):
         state = self._init_state(batch_size, device=device)
         for i in range(seq_length):
             if i == 0:
-                input = torch.zeros(batch_size, dtype=torch.long, device=device)  # BOS
+                words = torch.zeros(batch_size, dtype=torch.long, device=device)  # BOS
             else:
-                input = labels[:, i-1]
-            output, state = self._core(input, fc_feats, att_feats1, att_feats2, att_masks, state)
+                words = labels[:, i-1]
+            output, state = self._core(words, fc_feats, att_feats1, att_feats2, att_masks, state)
             outputs[:, i] = output
             if labels[:, i].sum() == 0:
                 break
@@ -97,8 +97,8 @@ class Generator(nn.Module):
         return (torch.zeros(self.num_layers, batch_size, self.rnn_size, device=device),
                 torch.zeros(self.num_layers, batch_size, self.rnn_size, device=device))
 
-    def _core(self, input, fc_feats, att_feats1, att_feats2, att_masks, state):
-        embed = self.embedding(input)
+    def _core(self, words, fc_feats, att_feats1, att_feats2, att_masks, state):
+        embed = self.embedding(words)
         output, state = self.decoder(embed, fc_feats, att_feats1, att_feats2, att_masks, state)
         output = F.softmax(self.output_layer(output), dim=1)
         return output, state

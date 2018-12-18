@@ -1,7 +1,7 @@
 from generator import Generator
 from discriminator import Discriminator
 from evaluator import Evaluator
-from loss import SequenceLoss
+from loss import SequenceLoss, ReinforceLoss
 import argparse
 import os
 import torch
@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from coco_caption import TrainCaption
+from cider import Cider
 
 
 class GAN:
@@ -22,6 +23,11 @@ class GAN:
             os.mkdir(args.checkpoint_path)
         self.generator = Generator(args).to(self.device)
         self.discriminator = Discriminator(args).to(self.device)
+        self.sequence_loss = SequenceLoss()
+        self.reinforce_loss = ReinforceLoss()
+        self.generator_optimizer = optim.Adam(self.generator.parameters(), lr=0.001)
+        self.evaluator = Evaluator('val', self.device, self.args)
+        self.cider = Cider(args)
 
     def train(self):
         if self.args.load_generator:
@@ -39,9 +45,6 @@ class GAN:
     def _pretrain_generator(self):
         train_caption = TrainCaption(self.args)
         train_loader = DataLoader(train_caption, batch_size=self.batch_size, shuffle=True, num_workers=4)
-        evaluator = Evaluator('val', self.device, self.args)
-        sequence_loss = SequenceLoss()
-        optimizer = optim.Adam(self.generator.parameters(), lr=0.001)
         iter = 0
         for epoch in range(25):
             self.generator.train()
@@ -49,20 +52,62 @@ class GAN:
                 for name, item in data.items():
                     data[name] = item.to(self.device)
                 self.generator.zero_grad()
-                prob = self.generator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'])
-                loss = sequence_loss(prob, data['labels'], data['masks'])
+                probs = self.generator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'])
+                loss = self.sequence_loss(probs, data['labels'])
                 loss.backward()
-                optimizer.step()
+                self.generator_optimizer.step()
                 print('iter {}, epoch {}, train loss {:.3f}'.format(iter, epoch, loss.item()))
                 iter += 1
-            evaluator.evaluate(self.generator)
+            self.evaluator.evaluate(self.generator)
             torch.save(self.generator.state_dict(), self.generator_checkpoint_path)
 
     def _pretrain_discriminator(self):
         pass
 
     def _train_gan(self):
+        train_caption = TrainCaption(self.args)
+        loader1 = DataLoader(train_caption, batch_size=self.batch_size, shuffle=True, num_workers=4)
+        iter1 = iter(loader1)
+        for i in range(100000):
+            for j in range(1):
+                try:
+                    data = next(iter1)
+                except StopIteration:
+                    iter1 = iter(loader1)
+                    data = next(iter1)
+                self._train_generator(data)
+            for j in range(1):
+                self._train_discriminator()
+            if i != 0 and i % 10000 == 0:
+                self.evaluator.evaluate(self.generator)
+                torch.save(self.generator.state_dict(), self.generator_checkpoint_path)
+
+    def _train_generator(self, data):
+        for name, item in data.items():
+            data[name] = item.to(self.device)
+        self.generator.zero_grad()
+
+        probs = self.generator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'])
+        loss1 = self.sequence_loss(probs, data['labels'])
+
+        seqs, probs = self.generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
+        greedy_seqs = self.generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks'])
+        reward = self._get_reward(data, seqs)
+        baseline = self._get_reward(data, greedy_seqs)
+        loss2 = self.reinforce_loss(reward, baseline, probs, seqs)
+
+        loss = loss1 + loss2
+        loss.backward()
+        self.generator_optimizer.step()
+
+    def _train_discriminator(self):
         pass
+
+    def _get_reward(self, data, seqs):
+        probs = self.discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], seqs)
+        scores = self.cider.get_scores(seqs, data['images'])
+        reward = probs + scores
+        return reward
 
 
 def parse_args():

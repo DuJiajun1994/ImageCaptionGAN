@@ -3,8 +3,11 @@ sys.path.append('coco-caption')
 import os
 import json
 import torch
+import argparse
 from torch.utils.data import DataLoader
-from coco_caption import TestCaption
+from coco_caption import ImageDataset
+from generator import Generator
+from vocab import Vocab
 from pycocotools.coco import COCO
 from pycocoevalcap.eval import COCOEvalCap
 
@@ -13,10 +16,9 @@ class Evaluator:
     def __init__(self, split, device, args):
         self.device = device
         self.annotation_file = 'coco-caption/annotations/captions_val2014.json'
-        dataset = TestCaption(split, args)
+        dataset = ImageDataset(split, args)
         self.loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
-        with open('data/vocab.json') as fid:
-            self.vocab = json.load(fid)
+        self.vocab = Vocab(args)
 
     def evaluate(self, generator):
         predictions = self._generate_predictions(generator)
@@ -32,7 +34,7 @@ class Evaluator:
                 data[name] = item.to(self.device)
             with torch.no_grad():
                 seqs = generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks']).cpu().numpy()
-            captions = self._decode_captions(seqs)
+            captions = self.vocab.decode_captions(seqs)
             for i, caption in enumerate(captions):
                 image_id = images[i]
                 predictions.append({
@@ -61,17 +63,29 @@ class Evaluator:
             metrics[metric] = score
         return metrics
 
-    def _decode_captions(self, seqs):
-        captions = []
-        for seq in seqs:
-            caption = ''
-            for i, word_id in enumerate(seq):
-                if word_id > 0:
-                    if i == 0:
-                        caption = self.vocab[str(word_id)]
-                    else:
-                        caption = caption + ' ' + self.vocab[str(word_id)]
-                else:
-                    break
-            captions.append(caption)
-        return captions
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--split', type=str, default='test')
+    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--beam_size', type=int, default=2)
+    parser.add_argument('--rnn_size', type=int, default=1024)
+    parser.add_argument('--num_layers', type=int, default=2)
+    parser.add_argument('--input_encoding_size', type=int, default=512)
+    parser.add_argument('--att_hid_size', type=int, default=512)
+    parser.add_argument('--fc_feat_size', type=int, default=2048)
+    parser.add_argument('--att_feat_size', type=int, default=2048)
+    parser.add_argument('--input_fc_dir', type=str, default='data/cocobu_fc')
+    parser.add_argument('--input_att_dir', type=str, default='data/cocobu_att')
+    parser.add_argument('--checkpoint_path', type=str, default='output')
+    args = parser.parse_args()
+    return args
+
+if __name__ == '__main__':
+    args = parse_args()
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    evaluator = Evaluator(args.split, device, args)
+    generator = Generator(args).to(device)
+    state_dict = torch.load(os.path.join(args.checkpoint_path, 'generator.pth'))
+    generator.load_state_dict(state_dict)
+    evaluator.evaluate(generator)
