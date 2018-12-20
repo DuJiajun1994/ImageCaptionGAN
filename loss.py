@@ -17,7 +17,7 @@ class SequenceLoss(nn.Module):
     def forward(self, probs, seqs):
         masks = get_masks(seqs)
         probs = probs.gather(2, seqs.unsqueeze(2)).squeeze(2)
-        losses = - torch.log(probs)
+        losses = - torch.log(probs + 1e-10)
         loss = losses.masked_select(masks).mean()
         return loss
 
@@ -29,6 +29,6 @@ class ReinforceLoss(nn.Module):
     def forward(self, reward, baseline, probs, seqs):
         masks = get_masks(seqs)
         probs = probs.gather(2, seqs.unsqueeze(2)).squeeze(2)
-        losses = - torch.log(probs) * (reward.detach() - baseline.detach()).unsqueeze(1)
+        losses = - torch.log(probs + 1e-10) * (reward.detach() - baseline.detach()).unsqueeze(1)
         loss = losses.masked_select(masks).mean()
         return loss

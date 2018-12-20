@@ -48,6 +48,6 @@ class Discriminator(nn.Module):
         valid_output = torch.cat(valid_output).view(batch_size,-1)
         #print (valid_output)
         out = self.output_layer(valid_output)
-        out = torch.sigmoid(out)
+        out = torch.sigmoid(out).squeeze(1)
         return out
 

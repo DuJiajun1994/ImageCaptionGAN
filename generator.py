@@ -46,18 +46,16 @@ class Generator(nn.Module):
         device = fc_feats.device
         batch_size = fc_feats.size(0)
         seqs = torch.zeros(batch_size, self.max_length, dtype=torch.long, device=device)
-        probs = torch.zeros(batch_size, self.max_length, device=device)
+        probs = torch.zeros(batch_size, self.max_length, self.vocab_size, device=device)
         words = torch.zeros(batch_size, dtype=torch.long, device=device)  # BOS
         state = self._init_state(batch_size, device=device)
         unfinished = torch.ones(batch_size, dtype=torch.long, device=device)
         for i in range(self.max_length):
             output, state = self._core(words, fc_feats, att_feats1, att_feats2, att_masks, state)
-            index = output.multinomial(num_samples=1)
-            words = index.squeeze(1) * unfinished
-            prob = output.gather(dim=1, index=index).squeeze(1) * unfinished.float()
+            words = output.multinomial(num_samples=1).squeeze(1) * unfinished
             unfinished = unfinished * (words > 0).long()
             seqs[:, i] = words
-            probs[:, i] = prob
+            probs[:, i] = output
             if unfinished.sum() == 0:
                 break
         return seqs, probs
@@ -113,7 +111,7 @@ class Generator(nn.Module):
         words = torch.zeros(beam_size, dtype=torch.long, device=device)  # BOS
         state = self._init_state(beam_size, device=device)
         output, state = self._core(words, fc_feats, att_feats1, att_feats2, att_masks, state)
-        word_scores = torch.log(output)
+        word_scores = torch.log(output + 1e-10)
         scores, words = word_scores[0].topk(beam_size, largest=True, sorted=True)
         seqs[:, 0] = words
         for i in range(1, self.max_length):
@@ -121,7 +119,7 @@ class Generator(nn.Module):
             if unfinished.sum() == 0:
                 break
             output, state = self._core(words, fc_feats, att_feats1, att_feats2, att_masks, state)
-            word_scores = torch.log(output)
+            word_scores = torch.log(output + 1e-10)
             unfinish_idx = unfinished.nonzero()
             finish_idx = (1 - unfinished).nonzero()
             unfinish_scores = (scores[unfinish_idx].unsqueeze(1).expand_as(word_scores[unfinish_idx]) + word_scores[unfinish_idx]).view(-1)

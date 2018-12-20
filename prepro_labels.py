@@ -59,15 +59,13 @@ def build_vocab(imgs, count_thr):
     return vocab
 
 
-def save_train_captions(imgs, wtoi, max_length):
+def save_captions(imgs, split, wtoi, max_length):
     images = []
     labels = []
     references = {}
-    cnt = 0
     for img in imgs:
         image_id = img['cocoid']
-        if img['split'] == 'train' or img['split'] == 'restval':
-            cnt += 1
+        if img['split'] == split or (split == 'train' and img['split'] == 'restval'):
             reference = []
             for caption in img['final_captions']:
                 label = np.zeros(max_length, dtype=np.int)
@@ -80,33 +78,14 @@ def save_train_captions(imgs, wtoi, max_length):
             references[image_id] = reference
     images = np.array(images)
     labels = np.array(labels)
-    print('train: images {}, captions {}'.format(cnt, images.shape[0]))
-    np.save('data/train_images.npy', images)
-    np.save('data/train_labels.npy', labels)
-    with open('data/train_references.pkl', 'w') as fid:
-        pickle.dump(references, fid)
+    print('{} captions: {}'.format(split, images.shape[0]))
+    np.save('data/{}_images.npy'.format(split), images)
+    np.save('data/{}_labels.npy'.format(split), labels)
+    if split == 'train':
+        with open('data/{}_references.pkl'.format(split), 'w') as fid:
+            pickle.dump(references, fid)
 
-def save_val_captions(imgs, wtoi, max_length):
-    images = []
-    labels = []
-    cnt = 0
-    for img in imgs:
-        image_id = img['cocoid']
-        if img['split'] == 'val':
-            cnt += 1
-            for caption in img['final_captions']:
-                label = np.zeros(max_length, dtype=np.int)
-                for i, w in enumerate(caption):
-                    if i < max_length:
-                        label[i] = wtoi[w]
-                images.append(image_id)
-                labels.append(label)
-    images = np.array(images)
-    labels = np.array(labels)
-    print('eval: images {}, captions {}'.format(cnt, images.shape[0]))
-    np.save('data/val_images.npy', images)
-    np.save('data/val_labels.npy', labels)
-    
+
 def get_reference(seq):
     words = []
     for word in seq:
@@ -117,14 +96,14 @@ def get_reference(seq):
     return caption
 
 
-def save_images(imgs, split):
+def save_raw_images(imgs, split):
     images = []
     for img in imgs:
         if img['split'] == split:
             images.append(img['cocoid'])
     images = np.array(images)
-    print('{}: images {}'.format(split, images.shape[0]))
-    np.save('data/{}_images.npy'.format(split), images)
+    print('{} images: {}'.format(split, images.shape[0]))
+    np.save('data/raw_{}_images.npy'.format(split), images)
 
 
 def parse_args():
@@ -146,9 +125,8 @@ if __name__ == "__main__":
     itow = {i + 1: w for i, w in enumerate(vocab)}  # a 1-indexed vocab translation table
     wtoi = {w: i + 1 for i, w in enumerate(vocab)}  # inverse table
 
-    save_train_captions(imgs, wtoi, args.max_length)
-    save_val_captions(imgs, wtoi, args.max_length)
-    #save_images(imgs, 'val')
-    save_images(imgs, 'test')
+    for split in ['train', 'val', 'test']:
+        save_raw_images(imgs, split)
+        save_captions(imgs, split, wtoi, args.max_length)
     with open('data/vocab.json', 'w') as fid:
         json.dump(itow, fid)

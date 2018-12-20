@@ -5,7 +5,7 @@ import json
 import torch
 import argparse
 from torch.utils.data import DataLoader
-from coco_caption import ImageDataset
+from coco_caption import ImageDataset, DiscCaption
 from generator import Generator
 from vocab import Vocab
 from pycocotools.coco import COCO
@@ -16,25 +16,52 @@ class Evaluator:
     def __init__(self, split, device, args):
         self.device = device
         self.annotation_file = 'coco-caption/annotations/captions_val2014.json'
-        dataset = ImageDataset(split, args)
-        self.loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+        generator_dataset = ImageDataset(split=split, expand_by_labels=False, args=args)
+        self.generator_loader = DataLoader(generator_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+        discriminator_dataset = DiscCaption('val', args)
+        self.discriminator_loader = DataLoader(discriminator_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
         self.vocab = Vocab(args)
 
-    def evaluate(self, generator):
+    def evaluate_generator(self, generator):
         predictions = self._generate_predictions(generator)
         metrics = self._evaluate_predictions(predictions)
         return metrics
 
+    def evaluate_discriminator(self, generator, discriminator):
+        discriminator.eval()
+        num_total = 0
+        sum_real = 0
+        sum_wrong = 0
+        sum_fake = 0
+        for data in self.discriminator_loader:
+            for name, item in data.items():
+                data[name] = item.to(self.device)
+            real_probs = discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'])
+            wrong_probs = discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['wrong_labels'])
+            with torch.no_grad():
+                fake_seqs, _ = generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
+            fake_probs = discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], fake_seqs)
+            num_total += len(real_probs)
+            sum_real += real_probs.sum().item()
+            sum_wrong += wrong_probs.sum().item()
+            sum_fake += fake_probs.sum().item()
+        real_prob = sum_real / float(num_total)
+        wrong_prob = sum_wrong / float(num_total)
+        fake_prob = sum_fake / float(num_total)
+        print('real prob: {}'.format(real_prob))
+        print('wrong prob: {}'.format(wrong_prob))
+        print('fake prob: {}'.format(fake_prob))
+
     def _generate_predictions(self, generator):
         generator.eval()
         predictions = []
-        for data in self.loader:
+        for data in self.generator_loader:
             images = data['images'].cpu().numpy()
             for name, item in data.items():
                 data[name] = item.to(self.device)
             with torch.no_grad():
-                seqs = generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks']).cpu().numpy()
-            captions = self.vocab.decode_captions(seqs)
+                seqs = generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks'])
+            captions = self.vocab.decode_captions(seqs.cpu().numpy())
             for i, caption in enumerate(captions):
                 image_id = images[i]
                 predictions.append({
@@ -88,4 +115,4 @@ if __name__ == '__main__':
     generator = Generator(args).to(device)
     state_dict = torch.load(os.path.join(args.checkpoint_path, 'generator.pth'))
     generator.load_state_dict(state_dict)
-    evaluator.evaluate(generator)
+    evaluator.evaluate_generator(generator)
