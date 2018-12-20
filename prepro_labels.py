@@ -86,7 +86,27 @@ def save_train_captions(imgs, wtoi, max_length):
     with open('data/train_references.pkl', 'w') as fid:
         pickle.dump(references, fid)
 
-
+def save_val_captions(imgs, wtoi, max_length):
+    images = []
+    labels = []
+    cnt = 0
+    for img in imgs:
+        image_id = img['cocoid']
+        if img['split'] == 'val':
+            cnt += 1
+            for caption in img['final_captions']:
+                label = np.zeros(max_length, dtype=np.int)
+                for i, w in enumerate(caption):
+                    if i < max_length:
+                        label[i] = wtoi[w]
+                images.append(image_id)
+                labels.append(label)
+    images = np.array(images)
+    labels = np.array(labels)
+    print('eval: images {}, captions {}'.format(cnt, images.shape[0]))
+    np.save('data/val_images.npy', images)
+    np.save('data/val_labels.npy', labels)
+    
 def get_reference(seq):
     words = []
     for word in seq:
@@ -127,7 +147,8 @@ if __name__ == "__main__":
     wtoi = {w: i + 1 for i, w in enumerate(vocab)}  # inverse table
 
     save_train_captions(imgs, wtoi, args.max_length)
-    save_images(imgs, 'val')
+    save_val_captions(imgs, wtoi, args.max_length)
+    #save_images(imgs, 'val')
     save_images(imgs, 'test')
     with open('data/vocab.json', 'w') as fid:
         json.dump(itow, fid)
