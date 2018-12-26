@@ -25,13 +25,13 @@ class GAN:
         self.discriminator = Discriminator(args).to(self.device)
         self.sequence_loss = SequenceLoss()
         self.reinforce_loss = ReinforceLoss()
-        self.generator_optimizer = optim.Adam(self.generator.parameters(), lr=0.001)
-        self.discriminator_optimizer = optim.Adam(self.discriminator.parameters(), lr=0.001)
-        self.evaluator = Evaluator('val', self.device, self.args)
+        self.generator_optimizer = optim.Adam(self.generator.parameters(), lr=args.generator_lr)
+        self.discriminator_optimizer = optim.Adam(self.discriminator.parameters(), lr=args.discriminator_lr)
+        self.evaluator = Evaluator('val', self.device, args)
         self.cider = Cider(args)
-        generator_dataset = CaptionDataset('train', self.args)
+        generator_dataset = CaptionDataset('train', args)
         self.generator_loader = DataLoader(generator_dataset, batch_size=self.batch_size, shuffle=True, num_workers=4)
-        discriminator_dataset = DiscCaption('train', self.args)
+        discriminator_dataset = DiscCaption('train', args)
         self.discriminator_loader = DataLoader(discriminator_dataset, batch_size=self.batch_size, shuffle=True, num_workers=4)
 
     def train(self):
@@ -47,7 +47,7 @@ class GAN:
 
     def _pretrain_generator(self):
         iter = 0
-        for epoch in range(10):
+        for epoch in range(self.args.pretrain_generator_epochs):
             self.generator.train()
             for data in self.generator_loader:
                 for name, item in data.items():
@@ -64,7 +64,7 @@ class GAN:
 
     def _pretrain_discriminator(self):
         iter = 0
-        for epoch in range(10):
+        for epoch in range(self.args.pretrain_discriminator_epochs):
             self.discriminator.train()
             for data in self.discriminator_loader:
                 loss = self._train_discriminator(data)
@@ -76,7 +76,7 @@ class GAN:
     def _train_gan(self):
         generator_iter = iter(self.generator_loader)
         discriminator_iter = iter(self.discriminator_loader)
-        for i in range(1000000):
+        for i in range(self.args.train_gan_iters):
             print('iter {}'.format(i))
             for j in range(1):
                 try:
@@ -157,6 +157,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--beam_size', type=int, default=2)
+    parser.add_argument('--generator_lr', type=float, default=1e-3)
+    parser.add_argument('--discriminator_lr', type=float, default=1e-3)
     parser.add_argument('--rnn_size', type=int, default=1024)
     parser.add_argument('--num_layers', type=int, default=2)
     parser.add_argument('--input_encoding_size', type=int, default=512)
@@ -170,12 +172,16 @@ def parse_args():
     parser.add_argument('--checkpoint_path', type=str, default='output')
     parser.add_argument('--load_generator', type=int, default=0)
     parser.add_argument('--load_discriminator', type=int, default=0)
+    parser.add_argument('--pretrain_generator_epochs', type=int, default=10)
+    parser.add_argument('--pretrain_discriminator_epochs', type=int, default=10)
+    parser.add_argument('--train_gan_iters', type=int, default=1000000)
     parser.add_argument('--gpu', type=int, default=0)
     args = parser.parse_args()
     return args
 
 if __name__ == '__main__':
     args = parse_args()
+    print(args)
     device = torch.device('cuda:{}'.format(args.gpu) if torch.cuda.is_available() else 'cpu')
     gan = GAN(device, args)
     gan.train()

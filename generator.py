@@ -17,8 +17,8 @@ class Generator(nn.Module):
         self.beam_size = args.beam_size
 
         self.embedding = nn.Embedding(self.vocab_size, args.input_encoding_size)
-        self.fc_embed = nn.Sequential(nn.Linear(args.fc_feat_size, args.rnn_size), nn.ReLU())
-        self.att_embed1 = nn.Sequential(nn.Linear(args.att_feat_size, args.rnn_size), nn.ReLU())
+        self.fc_embed = nn.Sequential(nn.Linear(args.fc_feat_size, args.rnn_size), nn.ReLU(), nn.Dropout(0.5))
+        self.att_embed1 = nn.Sequential(nn.Linear(args.att_feat_size, args.rnn_size), nn.ReLU(), nn.Dropout(0.5))
         self.att_embed2 = nn.Linear(args.att_feat_size, args.att_hid_size)
         self.decoder = TopDown(args)
         self.output_layer = nn.Linear(args.rnn_size, self.vocab_size)
@@ -120,6 +120,7 @@ class Generator(nn.Module):
                 break
             output, state = self._core(words, fc_feats, att_feats1, att_feats2, att_masks, state)
             word_scores = torch.log(output + 1e-10)
+            word_scores[:, word_scores.size(1) - 1] = word_scores[:, word_scores.size(1) - 1] - 1000    # suppress UNK
             unfinish_idx = unfinished.nonzero()
             finish_idx = (1 - unfinished).nonzero()
             unfinish_scores = (scores[unfinish_idx].unsqueeze(1).expand_as(word_scores[unfinish_idx]) + word_scores[unfinish_idx]).view(-1)

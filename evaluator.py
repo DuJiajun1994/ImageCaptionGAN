@@ -105,12 +105,13 @@ def parse_args():
     parser.add_argument('--input_fc_dir', type=str, default='data/cocobu_fc')
     parser.add_argument('--input_att_dir', type=str, default='data/cocobu_att')
     parser.add_argument('--checkpoint_path', type=str, default='output')
+    parser.add_argument('--gpu', type=int, default=0)
     args = parser.parse_args()
     return args
 
 if __name__ == '__main__':
     args = parse_args()
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:{}'.format(args.gpu) if torch.cuda.is_available() else 'cpu')
     evaluator = Evaluator(args.split, device, args)
     generator = Generator(args).to(device)
     state_dict = torch.load(os.path.join(args.checkpoint_path, 'generator.pth'))
