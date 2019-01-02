@@ -11,7 +11,7 @@ class Generator(nn.Module):
         with open('data/vocab.json') as fid:
             vocab = json.load(fid)
         self.vocab_size = len(vocab) + 1
-        self.max_length = 20
+        self.max_length = 16
         self.num_layers = args.num_layers
         self.rnn_size = args.rnn_size
         self.beam_size = args.beam_size

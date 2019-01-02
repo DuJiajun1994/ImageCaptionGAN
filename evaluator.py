@@ -36,11 +36,11 @@ class Evaluator:
         for data in self.discriminator_loader:
             for name, item in data.items():
                 data[name] = item.to(self.device)
-            real_probs = discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'])
-            wrong_probs = discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['wrong_labels'])
+            real_probs = discriminator(data['labels'], data['match_labels'])
+            wrong_probs = discriminator(data['labels'], data['wrong_labels'])
             with torch.no_grad():
                 fake_seqs, _ = generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
-            fake_probs = discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], fake_seqs)
+            fake_probs = discriminator(data['labels'], fake_seqs)
             num_total += len(real_probs)
             sum_real += real_probs.sum().item()
             sum_wrong += wrong_probs.sum().item()

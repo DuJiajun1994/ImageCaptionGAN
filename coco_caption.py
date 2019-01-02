@@ -57,4 +57,13 @@ class DiscCaption(CaptionDataset):
         while self.images[wrong_index] == self.images[index]:
             wrong_index = random.randint(0, num_labels - 1)
         item['wrong_labels'] = self.labels[wrong_index]
+        item['match_labels'] = self._get_match_label(index)
         return item
+
+    def _get_match_label(self, index):
+        mi = max(index - 5, 0)
+        ma = min(index + 5, len(self.labels) - 1)
+        match_index = random.randint(mi, ma)
+        while match_index == index or self.images[match_index] != self.images[index]:
+            match_index = random.randint(mi, ma)
+        return self.labels[match_index]

@@ -67,8 +67,9 @@ class GAN:
         for epoch in range(self.args.pretrain_discriminator_epochs):
             self.discriminator.train()
             for data in self.discriminator_loader:
-                loss = self._train_discriminator(data)
-                print('iter {}, epoch {}, discriminator loss {:.3f}'.format(iter, epoch, loss))
+                result = self._train_discriminator(data)
+                print('iter {}, epoch {}, discriminator loss {:.3f}'.format(iter, epoch, result['loss']))
+                print('real {:.3f}, wrong {:.3f}, fake {:.3f}'.format(result['real_prob'], result['wrong_prob'], result['fake_prob']))
                 iter += 1
             self.evaluator.evaluate_discriminator(generator=self.generator, discriminator=self.discriminator)
             torch.save(self.discriminator.state_dict(), self.discriminator_checkpoint_path)
@@ -85,15 +86,16 @@ class GAN:
                     generator_iter = iter(self.generator_loader)
                     data = next(generator_iter)
                 result = self._train_generator(data)
-                print('generator loss {:.3f}, fake prob {:.3f}, cider score {:.3f}'.format(result['loss'], result['fake_prob'], result['cider_score']))
+                print('fake prob {:.3f}, cider score {:.3f}'.format(result['fake_prob'], result['cider_score']))
             for j in range(1):
                 try:
                     data = next(discriminator_iter)
                 except StopIteration:
                     discriminator_iter = iter(self.discriminator_loader)
                     data = next(discriminator_iter)
-                loss = self._train_discriminator(data)
-                print('discriminator loss {:.3f}'.format(loss))
+                result = self._train_discriminator(data)
+                print('discriminator loss {:.3f}'.format(result['loss']))
+                print('real {:.3f}, wrong {:.3f}, fake {:.3f}'.format(result['real_prob'], result['wrong_prob'], result['fake_prob']))
             if i != 0 and i % 10000 == 0:
                 self.evaluator.evaluate_generator(self.generator)
                 torch.save(self.generator.state_dict(), self.generator_checkpoint_path)
@@ -105,21 +107,10 @@ class GAN:
         for name, item in data.items():
             data[name] = item.to(self.device)
         self.generator.zero_grad()
-
-        probs = self.generator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'])
-        loss1 = self.sequence_loss(probs, data['labels'])
-
-        seqs, probs = self.generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
-        greedy_seqs = self.generator.greedy_decode(data['fc_feats'], data['att_feats'], data['att_masks'])
-        reward, fake_prob, score = self._get_reward(data, seqs)
-        baseline, _, _ = self._get_reward(data, greedy_seqs)
-        loss2 = self.reinforce_loss(reward, baseline, probs, seqs)
-
-        loss = loss1 + loss2
+        loss, score, fake_prob = self._rl_loss(data)
         loss.backward()
         self.generator_optimizer.step()
         result = {
-            'loss': loss1.item(),
             'fake_prob': fake_prob,
             'cider_score': score
         }
@@ -131,26 +122,51 @@ class GAN:
             data[name] = item.to(self.device)
         self.discriminator.zero_grad()
 
-        real_probs = self.discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'])
-        wrong_probs = self.discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['wrong_labels'])
+        real_probs = self.discriminator(data['labels'], data['match_labels'])
+        wrong_probs = self.discriminator(data['labels'], data['wrong_labels'])
 
         # generate fake data
         with torch.no_grad():
             fake_seqs, _ = self.generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
-        fake_probs = self.discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], fake_seqs)
+        fake_probs = self.discriminator(data['labels'], fake_seqs)
 
         loss = -(0.5 * torch.log(real_probs + 1e-10) + 0.25 * torch.log(1 - wrong_probs + 1e-10) + 0.25 * torch.log(1 - fake_probs + 1e-10)).mean()
         loss.backward()
         self.discriminator_optimizer.step()
-        return loss.item()
+        result = {
+            'loss': loss.item(),
+            'real_prob': real_probs.mean().item(),
+            'wrong_prob': wrong_probs.mean().item(),
+            'fake_prob': fake_probs.mean().item()
+        }
+        return result
 
-    def _get_reward(self, data, seqs):
-        probs = self.discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], seqs)
-        scores = self.cider.get_scores(seqs.cpu().numpy(), data['images'].cpu().numpy())
-        reward = probs + torch.tensor(scores, dtype=torch.float, device=self.device)
-        fake_prob = probs.mean().item()
-        score = scores.mean()
-        return reward, fake_prob, score
+    def _rl_loss(self, data):
+        batch_size = len(data['fc_feats'])
+        num_samples = 2
+        fc_feats, att_feats, att_masks, images, labels = self._expand(num_samples, data['fc_feats'], data['att_feats'], data['att_masks'], data['images'], data['labels'])
+        seqs, probs = self.generator.sample(fc_feats, att_feats, att_masks)
+        scores = self.cider.get_scores(seqs.cpu().numpy(), images.cpu().numpy())
+        with torch.no_grad():
+            fake_probs = self.discriminator(labels, seqs)
+        reward = fake_probs
+        baseline = reward.view(num_samples, -1).mean(0, keepdim=True).expand(num_samples, batch_size).contiguous().view(-1)
+        loss = self.reinforce_loss(reward, baseline, probs, seqs)
+        return loss, scores.mean(), fake_probs.mean().item()
+
+    def _expand(self, num_samples, fc_feats, att_feats, att_masks, images, labels):
+        fc_feats = self._expand_tensor(num_samples, fc_feats)
+        att_feats = self._expand_tensor(num_samples, att_feats)
+        att_masks = self._expand_tensor(num_samples, att_masks)
+        images = self._expand_tensor(num_samples, images)
+        labels = self._expand_tensor(num_samples, labels)
+        return fc_feats, att_feats, att_masks, images, labels
+
+    def _expand_tensor(self, num_samples, tensor):
+        tensor_size = list(tensor.size())
+        tensor = tensor.unsqueeze(0).expand([num_samples] + tensor_size)
+        tensor_size[0] *= num_samples
+        return tensor.contiguous().view(tensor_size)
 
 
 def parse_args():
@@ -172,8 +188,8 @@ def parse_args():
     parser.add_argument('--checkpoint_path', type=str, default='output')
     parser.add_argument('--load_generator', type=int, default=0)
     parser.add_argument('--load_discriminator', type=int, default=0)
-    parser.add_argument('--pretrain_generator_epochs', type=int, default=10)
-    parser.add_argument('--pretrain_discriminator_epochs', type=int, default=10)
+    parser.add_argument('--pretrain_generator_epochs', type=int, default=30)
+    parser.add_argument('--pretrain_discriminator_epochs', type=int, default=30)
     parser.add_argument('--train_gan_iters', type=int, default=1000000)
     parser.add_argument('--gpu', type=int, default=0)
     args = parser.parse_args()
