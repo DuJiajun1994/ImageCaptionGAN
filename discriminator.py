@@ -22,10 +22,11 @@ class Discriminator(nn.Module):
         return outputs
 
     def _embed_seqs(self, seqs):
-        lengths = (seqs > 0).sum(1)
-        lengths[lengths == 0] = 1
+        mask = seqs > 0
         embed = self.embedding(seqs)
         output, _ = self.lstm(embed)
-        output = [output[b, s-1, :] for b, s in enumerate(lengths)]
-        output = torch.cat(output).view(len(seqs), -1)
+        output = output * mask.unsqueeze(2).float()
+        length = mask.sum(1)
+        length[length == 0] = 1
+        output = output.sum(1) / length.unsqueeze(1).float()
         return output

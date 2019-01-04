@@ -48,14 +48,15 @@ class GAN:
     def _pretrain_generator(self):
         iter = 0
         for epoch in range(self.args.pretrain_generator_epochs):
-            self.generator.train()
             for data in self.generator_loader:
+                self.generator.train()
                 for name, item in data.items():
                     data[name] = item.to(self.device)
                 self.generator.zero_grad()
                 probs = self.generator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'])
                 loss = self.sequence_loss(probs, data['labels'])
                 loss.backward()
+                self._clip_gradient(self.generator_optimizer)
                 self.generator_optimizer.step()
                 print('iter {}, epoch {}, generator loss {:.3f}'.format(iter, epoch, loss.item()))
                 iter += 1
@@ -65,7 +66,6 @@ class GAN:
     def _pretrain_discriminator(self):
         iter = 0
         for epoch in range(self.args.pretrain_discriminator_epochs):
-            self.discriminator.train()
             for data in self.discriminator_loader:
                 result = self._train_discriminator(data)
                 print('iter {}, epoch {}, discriminator loss {:.3f}'.format(iter, epoch, result['loss']))
@@ -104,11 +104,13 @@ class GAN:
 
     def _train_generator(self, data):
         self.generator.train()
+        self.discriminator.eval()
         for name, item in data.items():
             data[name] = item.to(self.device)
         self.generator.zero_grad()
         loss, score, fake_prob = self._rl_loss(data)
         loss.backward()
+        self._clip_gradient(self.generator_optimizer)
         self.generator_optimizer.step()
         result = {
             'fake_prob': fake_prob,
@@ -117,6 +119,7 @@ class GAN:
         return result
 
     def _train_discriminator(self, data):
+        self.generator.eval()
         self.discriminator.train()
         for name, item in data.items():
             data[name] = item.to(self.device)
@@ -132,6 +135,7 @@ class GAN:
 
         loss = -(0.5 * torch.log(real_probs + 1e-10) + 0.25 * torch.log(1 - wrong_probs + 1e-10) + 0.25 * torch.log(1 - fake_probs + 1e-10)).mean()
         loss.backward()
+        self._clip_gradient(self.discriminator_optimizer)
         self.discriminator_optimizer.step()
         result = {
             'loss': loss.item(),
@@ -167,6 +171,11 @@ class GAN:
         tensor = tensor.unsqueeze(0).expand([num_samples] + tensor_size)
         tensor_size[0] *= num_samples
         return tensor.contiguous().view(tensor_size)
+
+    def _clip_gradient(self, optimizer):
+        for group in optimizer.param_groups:
+            for param in group['params']:
+                param.grad.data.clamp_(-0.1, 0.1)
 
 
 def parse_args():
