@@ -80,7 +80,7 @@ class Generator(nn.Module):
     def beam_search(self, fc_feats, att_feats, att_masks):
         device = fc_feats.device
         batch_size = fc_feats.size(0)
-        seqs = torch.zeros(batch_size, self.max_length, dtype=torch.long, device=device)
+        seqs = torch.zeros(batch_size, self.beam_size, self.max_length, dtype=torch.long, device=device)
         for i in range(batch_size):
             seqs[i] = self._beam_search_single_sample(fc_feats[i], att_feats[i], att_masks[i])
         return seqs
@@ -138,7 +138,7 @@ class Generator(nn.Module):
             seqs = seqs[seq_idx]
             seqs[:, i] = words
             state = self._choose_state(state, seq_idx, device)
-        return seqs[0]
+        return seqs
 
     def _expand(self, expand_size, fc_feats, att_feats1, att_feats2, att_masks):
         fc_feats = self._expand_tensor(expand_size, fc_feats)

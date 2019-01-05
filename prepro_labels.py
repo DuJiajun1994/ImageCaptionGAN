@@ -62,11 +62,14 @@ def build_vocab(imgs, count_thr):
 def save_captions(imgs, split, wtoi, max_length):
     images = []
     labels = []
+    raw_images = []
+    raw_labels = []
     references = {}
     for img in imgs:
         image_id = img['cocoid']
         if img['split'] == split or (split == 'train' and img['split'] == 'restval'):
             reference = []
+            tmp_raw_labels = []
             for caption in img['final_captions']:
                 label = np.zeros(max_length, dtype=np.int)
                 for i, w in enumerate(caption):
@@ -75,12 +78,20 @@ def save_captions(imgs, split, wtoi, max_length):
                 images.append(image_id)
                 labels.append(label)
                 reference.append(get_reference(label))
+                if len(tmp_raw_labels) < 5:
+                    tmp_raw_labels.append(label)
             references[image_id] = reference
+            raw_images.append(image_id)
+            raw_labels.append(tmp_raw_labels)
     images = np.array(images)
     labels = np.array(labels)
-    print('{} captions: {}'.format(split, images.shape[0]))
+    raw_images = np.array(raw_images)
+    raw_labels = np.array(raw_labels)
+    print('{}: images {}, captions {}'.format(split, len(raw_images), len(labels)))
     np.save('data/{}_images.npy'.format(split), images)
     np.save('data/{}_labels.npy'.format(split), labels)
+    np.save('data/raw_{}_images.npy'.format(split), raw_images)
+    np.save('data/raw_{}_labels.npy'.format(split), raw_labels)
     if split == 'train':
         with open('data/{}_references.pkl'.format(split), 'w') as fid:
             pickle.dump(references, fid)
@@ -94,16 +105,6 @@ def get_reference(seq):
             break
     caption = ' '.join(words)
     return caption
-
-
-def save_raw_images(imgs, split):
-    images = []
-    for img in imgs:
-        if img['split'] == split:
-            images.append(img['cocoid'])
-    images = np.array(images)
-    print('{} images: {}'.format(split, images.shape[0]))
-    np.save('data/raw_{}_images.npy'.format(split), images)
 
 
 def parse_args():
@@ -126,7 +127,6 @@ if __name__ == "__main__":
     wtoi = {w: i + 1 for i, w in enumerate(vocab)}  # inverse table
 
     for split in ['train', 'val', 'test']:
-        save_raw_images(imgs, split)
         save_captions(imgs, split, wtoi, args.max_length)
     with open('data/vocab.json', 'w') as fid:
         json.dump(itow, fid)

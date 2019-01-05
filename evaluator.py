@@ -7,6 +7,7 @@ import argparse
 from torch.utils.data import DataLoader
 from coco_caption import ImageDataset, DiscCaption
 from generator import Generator
+from discriminator import Discriminator
 from vocab import Vocab
 from pycocotools.coco import COCO
 from pycocoevalcap.eval import COCOEvalCap
@@ -62,6 +63,7 @@ class Evaluator:
                 data[name] = item.to(self.device)
             with torch.no_grad():
                 seqs = generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks'])
+                seqs = seqs[:, 0]
             captions = self.vocab.decode_captions(seqs.cpu().numpy())
             for i, caption in enumerate(captions):
                 image_id = images[i]
@@ -106,6 +108,7 @@ def parse_args():
     parser.add_argument('--input_fc_dir', type=str, default='data/cocobu_fc')
     parser.add_argument('--input_att_dir', type=str, default='data/cocobu_att')
     parser.add_argument('--checkpoint_path', type=str, default='output')
+    parser.add_argument('--evaluate_generator', type=int, default=1)
     parser.add_argument('--gpu', type=int, default=0)
     args = parser.parse_args()
     return args
@@ -117,4 +120,10 @@ if __name__ == '__main__':
     generator = Generator(args).to(device)
     state_dict = torch.load(os.path.join(args.checkpoint_path, 'generator.pth'))
     generator.load_state_dict(state_dict)
-    evaluator.evaluate_generator(generator)
+    if args.evaluate_generator == 1:
+        evaluator.evaluate_generator(generator)
+    else:
+        discriminator = Discriminator(args).to(device)
+        state_dict = torch.load(os.path.join(args.checkpoint_path, 'discriminator.pth'))
+        discriminator.load_state_dict(state_dict)
+        evaluator.evaluate_discriminator(generator, discriminator)
