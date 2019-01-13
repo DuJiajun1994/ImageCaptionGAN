@@ -134,10 +134,12 @@ class GAN:
 
         # generate fake data
         with torch.no_grad():
-            fake_seqs, _ = self.generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
-        fake_probs = self.discriminator(data['labels'], fake_seqs)
+            fake_seqs = self.generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks'])
+        fake_seqs = fake_seqs.view(-1, fake_seqs.size(-1))
+        labels = data['labels'].unsqueeze(1).expand(-1, 2, data['labels'].size(-1)).contiguous().view(-1, data['labels'].size(-1))
+        fake_probs = self.discriminator(labels, fake_seqs)
 
-        loss = -(0.5 * torch.log(real_probs + 1e-10) + 0.25 * torch.log(1 - wrong_probs + 1e-10) + 0.25 * torch.log(1 - fake_probs + 1e-10)).mean()
+        loss = -(0.5 * torch.log(real_probs + 1e-10).mean() + 0.25 * torch.log(1 - wrong_probs + 1e-10).mean() + 0.25 * torch.log(1 - fake_probs + 1e-10).mean())
         loss.backward()
         self._clip_gradient(self.discriminator_optimizer)
         self.discriminator_optimizer.step()
@@ -159,9 +161,13 @@ class GAN:
 
     def _rl_loss(self, data):
         batch_size = len(data['fc_feats'])
-        num_samples = 2
+        num_samples = self.args.beam_size
+        with torch.no_grad():
+            seqs = self.generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks'])
+        seqs = seqs.transpose(0, 1).contiguous().view(num_samples * batch_size, -1)
         fc_feats, att_feats, att_masks, images = self._expand(num_samples, data['fc_feats'], data['att_feats'], data['att_masks'], data['images'])
-        seqs, probs = self.generator.sample(fc_feats, att_feats, att_masks)
+        probs = self.generator(fc_feats, att_feats, att_masks, seqs)
+
         scores = self.cider.get_scores(seqs.cpu().numpy(), images.cpu().numpy())
         expand_seqs = seqs.unsqueeze(1).expand(num_samples * batch_size, 5, -1).contiguous().view(num_samples * batch_size * 5, -1)
         labels = data['labels']
