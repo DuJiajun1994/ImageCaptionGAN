@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import json
 
 
@@ -14,12 +15,19 @@ class Discriminator(nn.Module):
         self.embedding = nn.Embedding(self.vocab_size, args.input_encoding_size)
         self.lstm = nn.LSTM(args.input_encoding_size, args.rnn_size, num_layers=1, batch_first=True)
         self.output_layer = nn.Linear(args.rnn_size * 2, 1)
+        self.word_output_layer = nn.Linear(args.rnn_size, self.vocab_size)
 
     def forward(self, seqs1, seqs2):
         embed1 = self._embed_seqs(seqs1)
         embed2 = self._embed_seqs(seqs2)
         embed = torch.cat([torch.abs(embed1 - embed2), embed1 * embed2], 1)
         outputs = torch.sigmoid(self.output_layer(embed)).squeeze(1)
+        return outputs
+
+    def predict(self, seqs):
+        embed = self.embedding(seqs)
+        outputs, _ = self.lstm(embed)
+        outputs = F.softmax(self.word_output_layer(outputs), dim=2)
         return outputs
 
     def _embed_seqs(self, seqs):

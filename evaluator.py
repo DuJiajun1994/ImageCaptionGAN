@@ -41,7 +41,7 @@ class Evaluator:
             with torch.no_grad():
                 real_probs = discriminator(data['labels'], data['match_labels'])
                 wrong_probs = discriminator(data['labels'], data['wrong_labels'])
-                fake_seqs = generator.greedy_decode(data['fc_feats'], data['att_feats'], data['att_masks'])
+                fake_seqs, _ = generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
                 fake_probs = discriminator(data['labels'], fake_seqs)
             num_total += len(real_probs)
             sum_real += real_probs.sum().item()
@@ -63,7 +63,6 @@ class Evaluator:
                 data[name] = item.to(self.device)
             with torch.no_grad():
                 seqs = generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks'])
-                seqs = seqs[:, 0]
             captions = self.vocab.decode_captions(seqs.cpu().numpy())
             for i, caption in enumerate(captions):
                 image_id = images[i]

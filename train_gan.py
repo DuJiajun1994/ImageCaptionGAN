@@ -30,6 +30,7 @@ class GAN:
         self.cider = Cider(args)
         discriminator_dataset = DiscCaption('train', args)
         self.discriminator_loader = DataLoader(discriminator_dataset, batch_size=self.batch_size, shuffle=True, num_workers=4)
+        self.xe_rate = 1.0
 
     def train(self):
         if self.args.load_generator:
@@ -66,9 +67,8 @@ class GAN:
         num_iter = 0
         for epoch in range(self.args.pretrain_discriminator_epochs):
             for data in self.discriminator_loader:
-                result = self._train_discriminator(data)
-                print('iter {}, epoch {}, discriminator loss {:.3f}'.format(num_iter, epoch, result['loss']))
-                print('real {:.3f}, wrong {:.3f}, fake {:.3f}'.format(result['real_prob'], result['wrong_prob'], result['fake_prob']))
+                print('iter {}, epoch {}'.format(num_iter, epoch))
+                self._train_discriminator(data)
                 num_iter += 1
             self.evaluator.evaluate_discriminator(generator=self.generator, discriminator=self.discriminator)
             torch.save(self.discriminator.state_dict(), self.discriminator_checkpoint_path)
@@ -79,21 +79,19 @@ class GAN:
         discriminator_iter = iter(self.discriminator_loader)
         num_iter = 0
         for epoch in range(self.args.train_gan_epochs):
+            self.xe_rate *= 0.6
+            print('xe rate: {}'.format(self.xe_rate))
             self._decay_learning_rate(epoch)
             for data in generator_loader:
                 print('iter {}, epoch {}'.format(num_iter, epoch))
                 num_iter += 1
-                result = self._train_generator(data)
-                print('generator loss {:.3f}'.format(result['loss']))
-                print('cider {:.3f}'.format(result['cider_score']))
+                self._train_generator(data)
                 try:
                     data = next(discriminator_iter)
                 except StopIteration:
                     discriminator_iter = iter(self.discriminator_loader)
                     data = next(discriminator_iter)
-                result = self._train_discriminator(data)
-                print('discriminator loss {:.3f}'.format(result['loss']))
-                print('real {:.3f}, wrong {:.3f}, fake {:.3f}'.format(result['real_prob'], result['wrong_prob'], result['fake_prob']))
+                self._train_discriminator(data)
             self.evaluator.evaluate_generator(self.generator)
             torch.save(self.generator.state_dict(), self.generator_checkpoint_path)
             self.evaluator.evaluate_discriminator(generator=self.generator, discriminator=self.discriminator)
@@ -106,7 +104,8 @@ class GAN:
             data[name] = item.to(self.device)
 
         self.generator.zero_grad()
-        loss1 = self._xe_loss(data)
+        xe_loss = self._xe_loss(data)
+        loss1 = xe_loss * self.xe_rate
         loss1.backward()
         self._clip_gradient(self.generator_optimizer)
         self.generator_optimizer.step()
@@ -116,11 +115,9 @@ class GAN:
         loss2.backward()
         self._clip_gradient(self.generator_optimizer)
         self.generator_optimizer.step()
-        result = {
-            'loss': loss1.item(),
-            'cider_score': score
-        }
-        return result
+
+        print('generator loss {:.3f}'.format(xe_loss.item()))
+        print('cider {:.3f}'.format(score))
 
     def _train_discriminator(self, data):
         self.generator.eval()
@@ -134,22 +131,26 @@ class GAN:
 
         # generate fake data
         with torch.no_grad():
-            fake_seqs = self.generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks'])
-        fake_seqs = fake_seqs.view(-1, fake_seqs.size(-1))
-        labels = data['labels'].unsqueeze(1).expand(-1, 2, data['labels'].size(-1)).contiguous().view(-1, data['labels'].size(-1))
-        fake_probs = self.discriminator(labels, fake_seqs)
+            fake_seqs, _ = self.generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
+        fake_probs = self.discriminator(data['labels'], fake_seqs)
 
         loss = -(0.5 * torch.log(real_probs + 1e-10).mean() + 0.25 * torch.log(1 - wrong_probs + 1e-10).mean() + 0.25 * torch.log(1 - fake_probs + 1e-10).mean())
         loss.backward()
         self._clip_gradient(self.discriminator_optimizer)
         self.discriminator_optimizer.step()
-        result = {
-            'loss': loss.item(),
-            'real_prob': real_probs.mean().item(),
-            'wrong_prob': wrong_probs.mean().item(),
-            'fake_prob': fake_probs.mean().item()
-        }
-        return result
+
+        self.discriminator.zero_grad()
+        probs = self.discriminator.predict(data['labels'])
+        labels = torch.zeros_like(data['labels'])
+        labels[:, :-1] = data['labels'][:, 1:]
+        xe_loss = self.sequence_loss(probs, labels)
+        xe_loss.backward()
+        self._clip_gradient(self.discriminator_optimizer)
+        self.discriminator_optimizer.step()
+
+        print('discriminator loss {:.3f}'.format(loss.item()))
+        print('real {:.3f}, wrong {:.3f}, fake {:.3f}'.format(real_probs.mean().item(), wrong_probs.mean().item(), fake_probs.mean().item()))
+        print('xe loss for discriminator: {}'.format(xe_loss.item()))
 
     def _xe_loss(self, data):
         batch_size = len(data['fc_feats'])
@@ -161,12 +162,9 @@ class GAN:
 
     def _rl_loss(self, data):
         batch_size = len(data['fc_feats'])
-        num_samples = self.args.beam_size
-        with torch.no_grad():
-            seqs = self.generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks'])
-        seqs = seqs.transpose(0, 1).contiguous().view(num_samples * batch_size, -1)
+        num_samples = 2
         fc_feats, att_feats, att_masks, images = self._expand(num_samples, data['fc_feats'], data['att_feats'], data['att_masks'], data['images'])
-        probs = self.generator(fc_feats, att_feats, att_masks, seqs)
+        seqs, probs = self.generator.sample(fc_feats, att_feats, att_masks)
 
         scores = self.cider.get_scores(seqs.cpu().numpy(), images.cpu().numpy())
         expand_seqs = seqs.unsqueeze(1).expand(num_samples * batch_size, 5, -1).contiguous().view(num_samples * batch_size * 5, -1)
@@ -196,7 +194,8 @@ class GAN:
     def _clip_gradient(self, optimizer):
         for group in optimizer.param_groups:
             for param in group['params']:
-                param.grad.data.clamp_(-0.1, 0.1)
+                if param.grad is not None:
+                    param.grad.data.clamp_(-0.1, 0.1)
 
     def _decay_learning_rate(self, epoch):
         learning_rate_decay_rate = 0.8
