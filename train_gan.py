@@ -72,6 +72,7 @@ class GAN:
                 num_iter += 1
             self.evaluator.evaluate_discriminator(generator=self.generator, discriminator=self.discriminator)
             torch.save(self.discriminator.state_dict(), self.discriminator_checkpoint_path)
+            self.evaluator.evaluate_correlation(generator=self.generator, discriminator=self.discriminator)
             
     def _train_gan(self):
         generator_dataset = GeneratorCaption('train', args)
@@ -96,6 +97,7 @@ class GAN:
             torch.save(self.generator.state_dict(), self.generator_checkpoint_path)
             self.evaluator.evaluate_discriminator(generator=self.generator, discriminator=self.discriminator)
             torch.save(self.discriminator.state_dict(), self.discriminator_checkpoint_path)
+            self.evaluator.evaluate_correlation(generator=self.generator, discriminator=self.discriminator)
 
     def _train_generator(self, data):
         self.generator.train()
@@ -150,7 +152,7 @@ class GAN:
 
         print('discriminator loss {:.3f}'.format(loss.item()))
         print('real {:.3f}, wrong {:.3f}, fake {:.3f}'.format(real_probs.mean().item(), wrong_probs.mean().item(), fake_probs.mean().item()))
-        print('xe loss for discriminator: {}'.format(xe_loss.item()))
+        print('xe loss for discriminator: {:.3f}'.format(xe_loss.item()))
 
     def _xe_loss(self, data):
         batch_size = len(data['fc_feats'])

@@ -4,11 +4,14 @@ import os
 import json
 import torch
 import argparse
+import numpy as np
+from scipy.stats.stats import pearsonr
 from torch.utils.data import DataLoader
-from coco_caption import ImageDataset, DiscCaption
+from coco_caption import ImageDataset, DiscCaption, CaptionDataset
 from generator import Generator
 from discriminator import Discriminator
 from vocab import Vocab
+from cider import Cider
 from pycocotools.coco import COCO
 from pycocoevalcap.eval import COCOEvalCap
 
@@ -21,7 +24,10 @@ class Evaluator:
         self.generator_loader = DataLoader(generator_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
         discriminator_dataset = DiscCaption('val', args)
         self.discriminator_loader = DataLoader(discriminator_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+        correlation_dataset = CaptionDataset('train', args)
+        self.correlation_loader = DataLoader(correlation_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
         self.vocab = Vocab(args)
+        self.cider = Cider(args)
 
     def evaluate_generator(self, generator):
         predictions = self._generate_predictions(generator)
@@ -53,6 +59,35 @@ class Evaluator:
         print('real prob: {}'.format(real_prob))
         print('wrong prob: {}'.format(wrong_prob))
         print('fake prob: {}'.format(fake_prob))
+
+    def evaluate_correlation(self, generator, discriminator):
+        generator.eval()
+        discriminator.eval()
+        num_sample_total = 32
+        corrs = []
+        cnt = 0
+        for data in self.correlation_loader:
+            cnt += 1
+            if cnt > 1000:
+                break
+            score = []
+            fake = []
+            for name, item in data.items():
+                data[name] = item.to(self.device)
+            for i in range(num_sample_total):
+                with torch.no_grad():
+                    fake_seqs, probs = generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
+                    fake_probs = discriminator(data['labels'], fake_seqs)
+                scores = self.cider.get_scores(fake_seqs.cpu().numpy(), data['images'].cpu().numpy())
+                score.append(scores)
+                fake.append(fake_probs.cpu().numpy())
+            score = np.array(score)
+            fake = np.array(fake)
+            for j in range(score.shape[1]):
+                corr, _ = pearsonr(score[:, j], fake[:, j])
+                corrs.append(corr)
+                print(corr)
+        print('correlation mean: {}'.format(np.array(corrs).mean()))
 
     def _generate_predictions(self, generator):
         generator.eval()
@@ -125,4 +160,7 @@ if __name__ == '__main__':
         discriminator = Discriminator(args).to(device)
         state_dict = torch.load(os.path.join(args.checkpoint_path, 'discriminator.pth'))
         discriminator.load_state_dict(state_dict)
-        evaluator.evaluate_discriminator(generator, discriminator)
+        if args.evaluate_generator == 0:
+            evaluator.evaluate_discriminator(generator, discriminator)
+        elif args.evaluate_generator == 2:
+            evaluator.evaluate_correlation(generator, discriminator)
