@@ -141,18 +141,8 @@ class GAN:
         self._clip_gradient(self.discriminator_optimizer)
         self.discriminator_optimizer.step()
 
-        self.discriminator.zero_grad()
-        probs = self.discriminator.predict(data['labels'])
-        labels = torch.zeros_like(data['labels'])
-        labels[:, :-1] = data['labels'][:, 1:]
-        xe_loss = self.sequence_loss(probs, labels)
-        xe_loss.backward()
-        self._clip_gradient(self.discriminator_optimizer)
-        self.discriminator_optimizer.step()
-
         print('discriminator loss {:.3f}'.format(loss.item()))
         print('real {:.3f}, wrong {:.3f}, fake {:.3f}'.format(real_probs.mean().item(), wrong_probs.mean().item(), fake_probs.mean().item()))
-        print('xe loss for discriminator: {:.3f}'.format(xe_loss.item()))
 
     def _xe_loss(self, data):
         batch_size = len(data['fc_feats'])

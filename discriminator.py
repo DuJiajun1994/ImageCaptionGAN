@@ -24,12 +24,6 @@ class Discriminator(nn.Module):
         outputs = torch.sigmoid(self.output_layer(embed)).squeeze(1)
         return outputs
 
-    def predict(self, seqs):
-        embed = self.embedding(seqs)
-        outputs, _ = self.lstm(embed)
-        outputs = F.softmax(self.word_output_layer(outputs), dim=2)
-        return outputs
-
     def _embed_seqs(self, seqs):
         lengths = (seqs > 0).sum(1)
         lengths[lengths == 0] = 1

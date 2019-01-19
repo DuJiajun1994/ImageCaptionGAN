@@ -25,7 +25,7 @@ class Evaluator:
         discriminator_dataset = DiscCaption('val', args)
         self.discriminator_loader = DataLoader(discriminator_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
         correlation_dataset = CaptionDataset('train', args)
-        self.correlation_loader = DataLoader(correlation_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+        self.correlation_loader = DataLoader(correlation_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
         self.vocab = Vocab(args)
         self.cider = Cider(args)
 
@@ -63,12 +63,12 @@ class Evaluator:
     def evaluate_correlation(self, generator, discriminator):
         generator.eval()
         discriminator.eval()
-        num_sample_total = 32
+        num_sample_total = 16
         corrs = []
         cnt = 0
         for data in self.correlation_loader:
             cnt += 1
-            if cnt > 1000:
+            if cnt > 16:
                 break
             score = []
             fake = []
