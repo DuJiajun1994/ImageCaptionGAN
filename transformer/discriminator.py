@@ -17,18 +17,22 @@ class Discriminator(nn.Module):
         vocab_size = len(vocab) + 1
         self.embedding = BERTEmbedding(vocab_size=vocab_size, embed_size=hidden)
         self.transformer_blocks = nn.ModuleList([TransformerBlock(hidden, attn_heads, hidden * 4, dropout) for _ in range(n_layers)])
-        self.output_layer = nn.Linear(hidden * 2, 1)
+        self.cos = nn.CosineSimilarity()
 
     def forward(self, seqs1, seqs2):
         embed1 = self._embed_seqs(seqs1)
         embed2 = self._embed_seqs(seqs2)
-        embed = torch.cat([torch.abs(embed1 - embed2), embed1 * embed2], 1)
-        outputs = torch.sigmoid(self.output_layer(embed)).squeeze(1)
+        outputs = (self.cos(embed1, embed2) + 1) / 2
         return outputs
 
     def _embed_seqs(self, seqs):
-        mask = (seqs > 0).unsqueeze(1).repeat(1, seqs.size(1), 1).unsqueeze(1)
-        x = self.embedding(seqs)
+        masks = seqs > 0
+        att_masks = masks.unsqueeze(1).repeat(1, seqs.size(1), 1).unsqueeze(1)
+        outputs = self.embedding(seqs)
         for transformer in self.transformer_blocks:
-            x = transformer.forward(x, mask)
-        return x[:, 0]
+            outputs = transformer.forward(outputs, att_masks)
+        outputs = outputs * masks.unsqueeze(2).float()
+        length = masks.sum(1)
+        length[length == 0] = 1
+        outputs = outputs.sum(1) / length.unsqueeze(1).float()
+        return outputs
