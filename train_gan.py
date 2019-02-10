@@ -67,6 +67,8 @@ class GAN:
         num_iter = 0
         for epoch in range(self.args.pretrain_discriminator_epochs):
             for data in self.discriminator_loader:
+                if num_iter % 1000 == 0:
+                    self.evaluator.evaluate_correlation(generator=self.generator, discriminator=self.discriminator)
                 print('iter {}, epoch {}'.format(num_iter, epoch))
                 self._train_discriminator(data)
                 num_iter += 1
@@ -80,8 +82,8 @@ class GAN:
         discriminator_iter = iter(self.discriminator_loader)
         num_iter = 0
         for epoch in range(self.args.train_gan_epochs):
-            self.xe_rate *= 0.6
-            print('xe rate: {}'.format(self.xe_rate))
+            # self.xe_rate *= 0.6
+            # print('xe rate: {}'.format(self.xe_rate))
             self._decay_learning_rate(epoch)
             for data in generator_loader:
                 print('iter {}, epoch {}'.format(num_iter, epoch))
@@ -105,12 +107,12 @@ class GAN:
         for name, item in data.items():
             data[name] = item.to(self.device)
 
-        self.generator.zero_grad()
-        xe_loss = self._xe_loss(data)
-        loss1 = xe_loss * self.xe_rate
-        loss1.backward()
-        self._clip_gradient(self.generator_optimizer)
-        self.generator_optimizer.step()
+        # self.generator.zero_grad()
+        # xe_loss = self._xe_loss(data)
+        # loss1 = xe_loss * self.xe_rate
+        # loss1.backward()
+        # self._clip_gradient(self.generator_optimizer)
+        # self.generator_optimizer.step()
 
         self.generator.zero_grad()
         loss2, score = self._rl_loss(data)
@@ -118,7 +120,7 @@ class GAN:
         self._clip_gradient(self.generator_optimizer)
         self.generator_optimizer.step()
 
-        print('generator loss {:.3f}'.format(xe_loss.item()))
+        # print('generator loss {:.3f}'.format(xe_loss.item()))
         print('cider {:.3f}'.format(score))
 
     def _train_discriminator(self, data):
@@ -128,13 +130,13 @@ class GAN:
             data[name] = item.to(self.device)
         self.discriminator.zero_grad()
 
-        real_probs = self.discriminator(data['labels'], data['match_labels'])
-        wrong_probs = self.discriminator(data['labels'], data['wrong_labels'])
+        real_probs = self.discriminator(data['fc_feats'], data['labels'], data['match_labels'])
+        wrong_probs = self.discriminator(data['fc_feats'], data['labels'], data['wrong_labels'])
 
         # generate fake data
         with torch.no_grad():
             fake_seqs, _ = self.generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
-        fake_probs = self.discriminator(data['labels'], fake_seqs)
+        fake_probs = self.discriminator(data['fc_feats'], data['labels'], fake_seqs)
 
         loss = -(0.5 * torch.log(real_probs + 1e-10).mean() + 0.25 * torch.log(1 - wrong_probs + 1e-10).mean() + 0.25 * torch.log(1 - fake_probs + 1e-10).mean())
         loss.backward()
@@ -160,10 +162,10 @@ class GAN:
 
         scores = self.cider.get_scores(seqs.cpu().numpy(), images.cpu().numpy())
         expand_seqs = seqs.unsqueeze(1).expand(num_samples * batch_size, 5, -1).contiguous().view(num_samples * batch_size * 5, -1)
-        labels = data['labels']
-        labels = labels.unsqueeze(0).expand(num_samples, batch_size, 5, -1).contiguous().view(num_samples * batch_size * 5, -1)
+        labels = data['labels'].unsqueeze(0).expand(num_samples, batch_size, 5, -1).contiguous().view(num_samples * batch_size * 5, -1)
+        fc_feats = data['fc_feats'].view(1, batch_size, 1, -1).expand(num_samples, batch_size, 5, -1).contiguous().view(num_samples * batch_size * 5, -1)
         with torch.no_grad():
-            fake_probs = self.discriminator(labels, expand_seqs)
+            fake_probs = self.discriminator(fc_feats, labels, expand_seqs)
         fake_probs = fake_probs.view(num_samples * batch_size, 5).mean(1)
         reward = fake_probs
         baseline = reward.view(num_samples, batch_size).mean(0, keepdim=True).expand(num_samples, batch_size).contiguous().view(-1)
