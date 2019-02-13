@@ -12,8 +12,10 @@ from generator import Generator
 from discriminator import Discriminator
 from vocab import Vocab
 from cider import Cider
+from diversity import evaluate_diversity
 from pycocotools.coco import COCO
 from pycocoevalcap.eval import COCOEvalCap
+from pycocoevalcap.tokenizer.ptbtokenizer import PTBTokenizer
 
 
 class Evaluator:
@@ -28,9 +30,11 @@ class Evaluator:
         self.correlation_loader = DataLoader(correlation_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
         self.vocab = Vocab(args)
         self.cider = Cider(args)
+        self.tokenizer = PTBTokenizer()
 
     def evaluate_generator(self, generator):
-        predictions = self._generate_predictions(generator)
+        predictions, capsById = self._generate_predictions(generator)
+        evaluate_diversity(self.tokenizer, capsById)
         metrics = self._evaluate_predictions(predictions)
         return metrics
 
@@ -92,21 +96,23 @@ class Evaluator:
     def _generate_predictions(self, generator):
         generator.eval()
         predictions = []
+        capsById = {}
         for data in self.generator_loader:
             images = data['images'].cpu().numpy()
             for name, item in data.items():
                 data[name] = item.to(self.device)
             with torch.no_grad():
-                seqs = generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks'])
-            captions = self.vocab.decode_captions(seqs.cpu().numpy())
-            for i, caption in enumerate(captions):
+                seqs = generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks']).cpu().numpy()
+            for i, seq in enumerate(seqs):
+                captions = self.vocab.decode_captions(seq)
                 image_id = images[i]
                 predictions.append({
                     'image_id': image_id,
-                    'caption': caption
+                    'caption': captions[0]
                 })
-                print('{} {}'.format(image_id, caption))
-        return predictions
+                print('{} {}'.format(image_id, captions[0]))
+                capsById[image_id] = [{'image_id': image_id, 'caption': caption} for caption in captions]
+        return predictions, capsById
 
     def _evaluate_predictions(self, predictions):
         if not os.path.isdir('eval_results'):
