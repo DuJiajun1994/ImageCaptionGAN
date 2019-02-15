@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from models.top_down import TopDown
+from loss import get_masks
 
 
 class Generator(nn.Module):
@@ -94,6 +95,22 @@ class Generator(nn.Module):
             tmp_fc_feats, tmp_att_feats, tmp_att_masks = self._expand(num_samples, fc_feats[i], att_feats[i], att_masks[i])
             seqs[i], _ = self.sample(tmp_fc_feats, tmp_att_feats, tmp_att_masks)
         return seqs
+
+    def sample_sort(self, fc_feats, att_feats, att_masks):
+        device = fc_feats.device
+        batch_size = fc_feats.size(0)
+        num_samples = 5
+        num_results = 5
+        results = torch.zeros(batch_size, num_results, self.max_length, dtype=torch.long, device=device)
+        for i in range(batch_size):
+            tmp_fc_feats, tmp_att_feats, tmp_att_masks = self._expand(num_samples, fc_feats[i], att_feats[i], att_masks[i])
+            seqs, probs = self.sample(tmp_fc_feats, tmp_att_feats, tmp_att_masks)
+            probs = probs.gather(2, seqs.unsqueeze(2)).squeeze(2)
+            masks = get_masks(seqs)
+            scores = (probs * masks.float()).mean(1)
+            _, idx = scores.topk(num_results, largest=True, sorted=True)
+            results[i] = seqs[idx]
+        return results
 
     def _prepare_feature(self, fc_feats, att_feats):
         fc_feats = self.fc_embed(fc_feats)
