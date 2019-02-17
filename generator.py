@@ -107,7 +107,7 @@ class Generator(nn.Module):
             seqs, probs = self.sample(tmp_fc_feats, tmp_att_feats, tmp_att_masks)
             probs = probs.gather(2, seqs.unsqueeze(2)).squeeze(2)
             masks = get_masks(seqs)
-            scores = (probs * masks.float()).mean(1)
+            scores = (probs * masks.float()).sum(1)
             _, idx = scores.topk(num_results, largest=True, sorted=True)
             results[i] = seqs[idx]
         return results
