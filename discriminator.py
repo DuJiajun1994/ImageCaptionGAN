@@ -10,19 +10,25 @@ class Discriminator(nn.Module):
         with open('data/vocab.json') as fid:
             vocab = json.load(fid)
         vocab_size = len(vocab) + 1
-        hidden_size = 512
-        self.word_embed = nn.Embedding(vocab_size, hidden_size)
-        self.lstm_embed1 = LSTMEmbedding(vocab_size=vocab_size, rnn_size=hidden_size)
-        self.lstm_embed2 = LSTMEmbedding(vocab_size=vocab_size, rnn_size=hidden_size)
-        self.lstm_embed3 = LSTMEmbedding(vocab_size=vocab_size, rnn_size=hidden_size)
-        self.fc_embed = nn.Linear(args.fc_feat_size, hidden_size)
-        self.output_layer = nn.Linear(hidden_size * 4, 1)
+        self.hidden_size = 512
+        self.word_embed = nn.Embedding(vocab_size, self.hidden_size)
+        self.lstm_embed1 = LSTMEmbedding(vocab_size=vocab_size, rnn_size=self.hidden_size)
+        self.lstm_embed2 = LSTMEmbedding(vocab_size=vocab_size, rnn_size=self.hidden_size)
+        self.lstm_embed3 = LSTMEmbedding(vocab_size=vocab_size, rnn_size=self.hidden_size)
+        self.fc_embed = nn.Linear(args.fc_feat_size, self.hidden_size)
+        self.output_layer = nn.Linear(self.hidden_size * 4 + 1, 1)
 
-    def forward(self, fc_feats, seqs1, seqs2):
-        txt2txt = self._embed(seqs1) * self._embed(seqs2)
-        im2txt = self._norm(self.fc_embed(fc_feats)) * self._norm(self.lstm_embed2(seqs2))
-        txt = self.lstm_embed3(seqs2)
-        outputs = torch.sigmoid(self.output_layer(torch.cat([txt2txt, im2txt, txt], 1))).squeeze(1)
+    def forward(self, fc_feats, labels, seqs, scores):
+        device = fc_feats.device
+        batch_size = labels.size(0)
+        num_labels = labels.size(1)
+        txt2txt = torch.zeros(num_labels, batch_size, self.hidden_size * 2, device=device)
+        for i in range(num_labels):
+            txt2txt[i] = self._embed(labels[:, i]) * self._embed(seqs)
+        txt2txt = txt2txt.mean(0)
+        im2txt = self._norm(self.fc_embed(fc_feats)) * self._norm(self.lstm_embed2(seqs))
+        txt = self.lstm_embed3(seqs)
+        outputs = torch.sigmoid(self.output_layer(torch.cat([txt2txt, im2txt, txt, scores.unsqueeze(1)], 1))).squeeze(1)
         return outputs
 
     def _embed(self, seqs):

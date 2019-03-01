@@ -46,27 +46,22 @@ class CaptionDataset(ImageDataset):
         return item
 
 
-class DiscCaption(CaptionDataset):
+class DiscCaption(ImageDataset):
     def __init__(self, split, args):
-        super(DiscCaption, self).__init__(split, args)
+        super(DiscCaption, self).__init__(split=split, expand_by_labels=False, args=args)
+        self.labels = np.load('data/raw_{}_labels.npy'.format(split))
 
     def __getitem__(self, index):
         item = super(DiscCaption, self).__getitem__(index)
         num_labels = len(self.labels)
         wrong_index = random.randint(0, num_labels - 1)
-        while self.images[wrong_index] == self.images[index]:
+        while wrong_index == index:
             wrong_index = random.randint(0, num_labels - 1)
-        item['wrong_labels'] = self.labels[wrong_index]
-        item['match_labels'] = self._get_match_label(index)
+        item['wrong_labels'] = self.labels[wrong_index][random.randint(0, 4)]
+        idx = random.randint(0, 4)
+        item['match_labels'] = self.labels[index][idx]
+        item['labels'] = np.concatenate([self.labels[index][:idx], self.labels[index][idx+1:]])
         return item
-
-    def _get_match_label(self, index):
-        mi = max(index - 5, 0)
-        ma = min(index + 5, len(self.labels) - 1)
-        match_index = random.randint(mi, ma)
-        while match_index == index or self.images[match_index] != self.images[index]:
-            match_index = random.randint(mi, ma)
-        return self.labels[match_index]
 
 
 class GeneratorCaption(ImageDataset):

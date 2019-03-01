@@ -67,14 +67,11 @@ class GAN:
         num_iter = 0
         for epoch in range(self.args.pretrain_discriminator_epochs):
             for data in self.discriminator_loader:
-                if num_iter % 1000 == 0:
-                    self.evaluator.evaluate_correlation(generator=self.generator, discriminator=self.discriminator)
                 print('iter {}, epoch {}'.format(num_iter, epoch))
                 self._train_discriminator(data)
                 num_iter += 1
             self.evaluator.evaluate_discriminator(generator=self.generator, discriminator=self.discriminator)
             torch.save(self.discriminator.state_dict(), self.discriminator_checkpoint_path)
-            self.evaluator.evaluate_correlation(generator=self.generator, discriminator=self.discriminator)
             
     def _train_gan(self):
         generator_dataset = GeneratorCaption('train', args)
@@ -99,7 +96,6 @@ class GAN:
             torch.save(self.generator.state_dict(), self.generator_checkpoint_path)
             self.evaluator.evaluate_discriminator(generator=self.generator, discriminator=self.discriminator)
             torch.save(self.discriminator.state_dict(), self.discriminator_checkpoint_path)
-            self.evaluator.evaluate_correlation(generator=self.generator, discriminator=self.discriminator)
 
     def _train_generator(self, data):
         self.generator.train()
@@ -130,13 +126,16 @@ class GAN:
             data[name] = item.to(self.device)
         self.discriminator.zero_grad()
 
-        real_probs = self.discriminator(data['fc_feats'], data['labels'], data['match_labels'])
-        wrong_probs = self.discriminator(data['fc_feats'], data['labels'], data['wrong_labels'])
+        real_scores = self.cider.get_scores(data['match_labels'], data['labels'])
+        real_probs = self.discriminator(data['fc_feats'], data['labels'], data['match_labels'], real_scores)
+        wrong_scores = self.cider.get_scores(data['wrong_labels'], data['labels'])
+        wrong_probs = self.discriminator(data['fc_feats'], data['labels'], data['wrong_labels'], wrong_scores)
 
         # generate fake data
         with torch.no_grad():
             fake_seqs, _ = self.generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
-        fake_probs = self.discriminator(data['fc_feats'], data['labels'], fake_seqs)
+        fake_scores = self.cider.get_scores(fake_seqs, data['labels'])
+        fake_probs = self.discriminator(data['fc_feats'], data['labels'], fake_seqs, fake_scores)
 
         loss = -(0.5 * torch.log(real_probs + 1e-10).mean() + 0.25 * torch.log(1 - wrong_probs + 1e-10).mean() + 0.25 * torch.log(1 - fake_probs + 1e-10).mean())
         loss.backward()
@@ -157,17 +156,11 @@ class GAN:
     def _rl_loss(self, data):
         batch_size = len(data['fc_feats'])
         num_samples = 2
-        fc_feats, att_feats, att_masks, images = self._expand(num_samples, data['fc_feats'], data['att_feats'], data['att_masks'], data['images'])
+        fc_feats, att_feats, att_masks, labels = self._expand(num_samples, data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'])
         seqs, probs = self.generator.sample(fc_feats, att_feats, att_masks)
-
-        scores = self.cider.get_scores(seqs.cpu().numpy(), images.cpu().numpy())
-        expand_seqs = seqs.unsqueeze(1).expand(num_samples * batch_size, 5, -1).contiguous().view(num_samples * batch_size * 5, -1)
-        labels = data['labels'].unsqueeze(0).expand(num_samples, batch_size, 5, -1).contiguous().view(num_samples * batch_size * 5, -1)
-        fc_feats = data['fc_feats'].view(1, batch_size, 1, -1).expand(num_samples, batch_size, 5, -1).contiguous().view(num_samples * batch_size * 5, -1)
+        scores = self.cider.get_scores(seqs, labels)
         with torch.no_grad():
-            fake_probs = self.discriminator(fc_feats, labels, expand_seqs)
-        fake_probs = fake_probs.view(num_samples * batch_size, 5).mean(1)
-        reward = fake_probs
+            reward = self.discriminator(fc_feats, labels, seqs, scores)
         baseline = reward.view(num_samples, batch_size).mean(0, keepdim=True).expand(num_samples, batch_size).contiguous().view(-1)
         loss = self.reinforce_loss(reward, baseline, probs, seqs)
         return loss, scores.mean()

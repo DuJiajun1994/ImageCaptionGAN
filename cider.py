@@ -1,26 +1,21 @@
 import sys
 sys.path.append("cider")
-import pickle
 from pyciderevalcap.ciderD.ciderD import CiderD
+import torch
 
 
 class Cider:
     def __init__(self, args):
         self.cider = CiderD(df='coco-train')
-        with open('data/train_references.pkl') as fid:
-            self.references = pickle.load(fid)
 
-    def get_scores(self, seqs, images):
-        captions = self._get_captions(seqs)
-        res = [{'image_id': i, 'caption': [caption]}
-               for i, caption in enumerate(captions)]
-        gts = {i: self.references[image_id] for i, image_id in enumerate(images)}
+    def get_scores(self, seqs, labels):
+        device = seqs.device
+        seqs = seqs.cpu().numpy()
+        labels = labels.cpu().numpy()
+        res = [{'image_id': i, 'caption': [self._get_caption(seq)]} for i, seq in enumerate(seqs)]
+        gts = {i: [self._get_caption(seq) for seq in label] for i, label in enumerate(labels)}
         _, scores = self.cider.compute_score(gts, res)
-        return scores
-
-    def _get_captions(self, seqs):
-        captions = [self._get_caption(seq) for seq in seqs]
-        return captions
+        return torch.tensor(scores, dtype=torch.float, device=device)
 
     def _get_caption(self, seq):
         words = []
