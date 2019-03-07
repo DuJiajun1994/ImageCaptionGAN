@@ -137,10 +137,11 @@ class GAN:
         fake_scores = self.cider.get_scores(fake_seqs, data['labels'])
         fake_probs = self.discriminator(data['fc_feats'], data['labels'], fake_seqs, fake_scores)
 
-        loss = -(0.5 * torch.log(real_probs + 1e-10).mean() + 0.25 * torch.log(1 - wrong_probs + 1e-10).mean() + 0.25 * torch.log(1 - fake_probs + 1e-10).mean())
+        loss = -(0.5 * real_probs.mean() - 0.25 * wrong_probs.mean() - 0.25 * fake_probs.mean())
         loss.backward()
         self._clip_gradient(self.discriminator_optimizer)
         self.discriminator_optimizer.step()
+        self._clip_weight()
 
         print('discriminator loss {:.3f}'.format(loss.item()))
         print('real {:.3f}, wrong {:.3f}, fake {:.3f}'.format(real_probs.mean().item(), wrong_probs.mean().item(), fake_probs.mean().item()))
@@ -183,6 +184,10 @@ class GAN:
             for param in group['params']:
                 if param.grad is not None:
                     param.grad.data.clamp_(-0.1, 0.1)
+
+    def _clip_weight(self):
+        for param in self.discriminator.parameters():
+            param.data.clamp_(-0.01, 0.01)
 
     def _decay_learning_rate(self, epoch):
         learning_rate_decay_rate = 0.8

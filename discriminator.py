@@ -28,7 +28,7 @@ class Discriminator(nn.Module):
         txt2txt = txt2txt.mean(0)
         im2txt = self._norm(self.fc_embed(fc_feats)) * self._norm(self.lstm_embed2(seqs))
         txt = self.lstm_embed3(seqs)
-        outputs = torch.sigmoid(self.output_layer(torch.cat([txt2txt, im2txt, txt, scores.unsqueeze(1)], 1))).squeeze(1)
+        outputs = self.output_layer(torch.cat([txt2txt, im2txt, txt, scores.unsqueeze(1)], 1)).squeeze(1)
         return outputs
 
     def _embed(self, seqs):
