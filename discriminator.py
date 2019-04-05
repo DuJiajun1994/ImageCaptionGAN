@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import json
-from lstm_embedding import LSTMEmbedding
+from models.lstm_embedding import LSTMEmbedding
 
 
 class Discriminator(nn.Module):
@@ -10,15 +10,15 @@ class Discriminator(nn.Module):
         with open('data/vocab.json') as fid:
             vocab = json.load(fid)
         vocab_size = len(vocab) + 1
-        self.hidden_size = 512
+        self.hidden_size = args.rnn_size
         self.word_embed = nn.Embedding(vocab_size, self.hidden_size)
         self.lstm_embed1 = LSTMEmbedding(vocab_size=vocab_size, rnn_size=self.hidden_size)
         self.lstm_embed2 = LSTMEmbedding(vocab_size=vocab_size, rnn_size=self.hidden_size)
         self.lstm_embed3 = LSTMEmbedding(vocab_size=vocab_size, rnn_size=self.hidden_size)
         self.fc_embed = nn.Linear(args.fc_feat_size, self.hidden_size)
-        self.output_layer = nn.Linear(self.hidden_size * 4 + 1, 1)
+        self.output_layer = nn.Linear(self.hidden_size * 4, 1)
 
-    def forward(self, fc_feats, labels, seqs, scores):
+    def forward(self, fc_feats, att_feats, att_masks, labels, seqs):
         device = fc_feats.device
         batch_size = labels.size(0)
         num_labels = labels.size(1)
@@ -28,7 +28,7 @@ class Discriminator(nn.Module):
         txt2txt = txt2txt.mean(0)
         im2txt = self._norm(self.fc_embed(fc_feats)) * self._norm(self.lstm_embed2(seqs))
         txt = self.lstm_embed3(seqs)
-        outputs = self.output_layer(torch.cat([txt2txt, im2txt, txt, scores.unsqueeze(1)], 1)).squeeze(1)
+        outputs = self.output_layer(torch.cat([txt2txt, im2txt, txt], 1)).squeeze(1)
         return outputs
 
     def _embed(self, seqs):

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from attention import Attention
+from models.attention import Attention
 
 
 class TopDown(nn.Module):

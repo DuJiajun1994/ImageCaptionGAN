@@ -49,13 +49,10 @@ class Evaluator:
             for name, item in data.items():
                 data[name] = item.to(self.device)
             with torch.no_grad():
-                real_scores = self.cider.get_scores(data['match_labels'], data['labels'])
-                real_probs = discriminator(data['fc_feats'], data['labels'], data['match_labels'], real_scores)
-                wrong_scores = self.cider.get_scores(data['wrong_labels'], data['labels'])
-                wrong_probs = discriminator(data['fc_feats'], data['labels'], data['wrong_labels'], wrong_scores)
+                real_probs = discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'], data['match_labels'])
+                wrong_probs = discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'], data['wrong_labels'])
                 fake_seqs, _ = generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
-                fake_scores = self.cider.get_scores(fake_seqs, data['labels'])
-                fake_probs = discriminator(data['fc_feats'], data['labels'], fake_seqs, fake_scores)
+                fake_probs = discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'], fake_seqs)
             num_total += len(real_probs)
             sum_real += real_probs.sum().item()
             sum_wrong += wrong_probs.sum().item()
@@ -105,7 +102,7 @@ class Evaluator:
             for name, item in data.items():
                 data[name] = item.to(self.device)
             with torch.no_grad():
-                seqs = generator.beam_search(data['fc_feats'], data['att_feats'], data['att_masks']).cpu().numpy()
+                seqs = generator.sample_more(data['fc_feats'], data['att_feats'], data['att_masks']).cpu().numpy()
             for i, seq in enumerate(seqs):
                 captions = self.vocab.decode_captions(seq)
                 image_id = images[i]

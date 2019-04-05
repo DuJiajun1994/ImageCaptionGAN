@@ -126,16 +126,13 @@ class GAN:
             data[name] = item.to(self.device)
         self.discriminator.zero_grad()
 
-        real_scores = self.cider.get_scores(data['match_labels'], data['labels'])
-        real_probs = self.discriminator(data['fc_feats'], data['labels'], data['match_labels'], real_scores)
-        wrong_scores = self.cider.get_scores(data['wrong_labels'], data['labels'])
-        wrong_probs = self.discriminator(data['fc_feats'], data['labels'], data['wrong_labels'], wrong_scores)
+        real_probs = self.discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'], data['match_labels'])
+        wrong_probs = self.discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'], data['wrong_labels'])
 
         # generate fake data
         with torch.no_grad():
             fake_seqs, _ = self.generator.sample(data['fc_feats'], data['att_feats'], data['att_masks'])
-        fake_scores = self.cider.get_scores(fake_seqs, data['labels'])
-        fake_probs = self.discriminator(data['fc_feats'], data['labels'], fake_seqs, fake_scores)
+        fake_probs = self.discriminator(data['fc_feats'], data['att_feats'], data['att_masks'], data['labels'], fake_seqs)
 
         loss = -(0.5 * real_probs.mean() - 0.25 * wrong_probs.mean() - 0.25 * fake_probs.mean())
         loss.backward()
@@ -161,7 +158,7 @@ class GAN:
         seqs, probs = self.generator.sample(fc_feats, att_feats, att_masks)
         scores = self.cider.get_scores(seqs, labels)
         with torch.no_grad():
-            reward = self.discriminator(fc_feats, labels, seqs, scores)
+            reward = self.discriminator(fc_feats, att_feats, att_masks, labels, seqs)
         baseline = reward.view(num_samples, batch_size).mean(0, keepdim=True).expand(num_samples, batch_size).contiguous().view(-1)
         loss = self.reinforce_loss(reward, baseline, probs, seqs)
         return loss, scores.mean()
