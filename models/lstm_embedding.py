@@ -3,10 +3,10 @@ import torch.nn as nn
 
 
 class LSTMEmbedding(nn.Module):
-    def __init__(self, vocab_size, rnn_size):
+    def __init__(self, vocab_size, hidden_size):
         super(LSTMEmbedding, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, rnn_size)
-        self.lstm = nn.LSTM(rnn_size, rnn_size, num_layers=1, batch_first=True)
+        self.embedding = nn.Embedding(vocab_size, hidden_size)
+        self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=1, batch_first=True)
 
     def forward(self, seqs):
         lengths = (seqs > 0).sum(1)
